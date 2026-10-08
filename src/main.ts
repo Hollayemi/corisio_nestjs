@@ -10,7 +10,7 @@ async function bootstrap() {
   app.setGlobalPrefix("api");
 
   app.enableCors({
-  origin: [/^https?:\/\/localhost(:\d+)?$/, "*"],
+  origin: [/^https?:\/\/localhost(:\d+)?$/, "https://corisio-demo.vercel.app/", "*"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
