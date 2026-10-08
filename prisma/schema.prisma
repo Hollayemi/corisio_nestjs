@@ -1,0 +1,1197 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────
+// PLATFORM ENUMS
+// ─────────────────────────────────────────────────────────────
+
+enum Role {
+  HAS_STORE
+  SUPER_ADMIN
+  SUPPORT
+  CUSTOMER
+}
+
+enum SignupAccountType {
+  CUSTOMER
+  STORE_OWNER
+}
+
+enum StoreMemberRole {
+  OWNER
+  OPERATIONS_MANAGER
+  INVENTORY_MANAGER
+  SUPPORT
+}
+
+enum StoreStatus {
+  PENDING // registered, awaiting approval
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum TeamMemberStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum LoginOutcome {
+  SUCCESS
+  FAILED
+  LOCKED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum CustomerActivityType {
+  ORDER_PLACED
+  ORDER_DELIVERED
+  ORDER_CANCELLED
+  POINTS_REDEEMED
+  POINTS_EARNED
+  MEMBERSHIP_SUBSCRIBED
+  MEMBERSHIP_CANCELLED
+  ADDRESS_ADDED
+  OTHER
+}
+
+// Categories are PLATFORM-WIDE — managed by SUPER_ADMIN
+enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+}
+
+enum StockStatus {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+}
+
+enum VariantOption {
+  NONE
+  PARENT
+  VARIANT
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  RETURNED
+  REFUNDED
+}
+
+enum OrderType {
+  SHOP
+  MEAT_BOX
+  FREEZER_PLANNER
+}
+
+enum DeliveryType {
+  DELIVERY
+  PICKUP
+}
+
+enum ReturnStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  PAYSTACK
+  FLUTTERWAVE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum PromotionType {
+  DISCOUNT_DEAL
+  COUPON_CODE
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_DELIVERY
+}
+
+enum AppliesTo {
+  ALL_ORDERS
+  CATEGORY
+  SPECIFIC_PRODUCTS
+}
+
+enum PromotionStatus {
+  ACTIVE
+  SCHEDULED
+  INACTIVE
+  EXPIRED
+  PAUSED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum MembershipInterval {
+  WEEK
+  MONTH
+  YEAR
+}
+
+enum DeliveryFrequency {
+  WEEKLY
+  FORTNIGHTLY
+  MONTHLY
+}
+
+enum ActiveStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SubscriptionStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+enum DeliveryStatus {
+  SCHEDULED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  MISSED
+  SKIPPED
+}
+
+enum OrderStepId {
+  PLACED
+  PAYMENT
+  PACKED
+  OUT_FOR_DELIVERY
+  RECEIVED
+  RATE
+}
+
+enum OrderStepState {
+  DONE
+  ACTIVE
+  PENDING
+}
+
+// ── Location / Distance
+enum ZoneShape {
+  RADIUS  // circle: center + radiusKm
+  POLYGON // arbitrary polygon (store GeoJSON in `polygon`)
+}
+
+// ─────────────────────────────────────────────────────────────
+// STORE (TENANT)
+// ─────────────────────────────────────────────────────────────
+
+model Store {
+  id          String      @id @default(cuid())
+  slug        String      @unique
+  name        String
+  legalName   String?
+  description String?
+  logo        String?
+  coverPhotos String[]    @default([])
+  banner      String?
+  email       String
+  phone       String
+  status      StoreStatus @default(PENDING)
+
+  // Platform fee / commission (optional)
+  commissionRate Decimal? @db.Decimal(5, 2)
+
+  // Per-store numbering prefix, e.g. "LX"
+  orderPrefix String @default("ORD")
+
+  // Default currency for this store
+  currency String @default("NGN")
+
+  // Physical location (primary pickup / dispatch point)
+  location StoreLocation?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+
+  tagline      String?  @db.VarChar(80) // one-liner under the name on the map card
+  whatsapp     String?                  // direct chat link
+  openingHours Json?                    // { mon: { closed, open: "08:00", close: "20:00" }, tue: ..., sun: ... }
+  socialLinks  Json?                    // { website, instagram, facebook, x }  (full https links, "" when unset)
+
+  members         StoreMember[]
+  addresses       StoreAddress[] // additional store locations (branches)
+  products        Product[]
+  categories      StoreCategory[] // which global categories this store sells
+  carts           Cart[]
+  orders          Order[]
+  promotions      Promotion[]
+  deliveryZones   DeliveryZone[]
+  membershipPlans MembershipPlan[]
+  proteins        Protein[]
+  subscriptions   Subscription[]
+  payments        Payment[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  counters        Counter[]
+  invitations     AdminInvitation[]
+  settings        StoreSettings?
+
+  @@index([slug])
+  @@index([status])
+}
+
+// Physical location of a store (lat/lng + address).
+// One-to-one with Store for the primary branch; use StoreAddress for extra branches.
+model StoreLocation {
+  id        String   @id @default(cuid())
+  storeId   String   @unique
+  label     String   @default("Main")
+  address   String
+  region    String
+  country   String   @default("Nigeria")
+  phone     String?
+  latitude  Float
+  longitude Float
+  timezone  String   @default("Africa/Lagos")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([latitude, longitude])
+}
+
+// Optional extra branches per store
+model StoreAddress {
+  id        String   @id @default(cuid())
+  storeId   String
+  label     String // "Ikeja Branch"
+  address   String
+  region    String
+  country   String   @default("Nigeria")
+  phone     String?
+  latitude  Float
+  longitude Float
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([latitude, longitude])
+}
+
+model StoreSettings {
+  id               String   @id @default(cuid())
+  storeId          String   @unique
+  allowPickup      Boolean  @default(true)
+  allowDelivery    Boolean  @default(true)
+  freeDeliveryOver Decimal? @db.Decimal(12, 2)
+  minOrderTotal    Decimal? @db.Decimal(12, 2)
+  returnWindowDays Int      @default(7)
+  updatedAt        DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────
+// STORE MEMBERSHIP (users who work in a store)
+// NOTE: this is STAFF membership. Customers are NOT stored here.
+// Store ownership is a StoreMember with role = OWNER.
+// ─────────────────────────────────────────────────────────────
+
+model StoreMember {
+  id         String           @id @default(cuid())
+  storeId    String
+  userId     String
+  role       StoreMemberRole
+  status     TeamMemberStatus @default(ACTIVE)
+  invitedAt  DateTime         @default(now())
+  acceptedAt DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, userId])
+  @@index([storeId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// USERS & AUTH
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  phone         String?
+  passwordHash  String?
+  emailVerified DateTime?
+  image         String?
+  role          Role      @default(CUSTOMER)
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  bio               String?
+  passwordChangedAt DateTime?
+  twoFactorEnabled  Boolean @default(false)
+  twoFactorSecret   String?
+
+  // Auth
+  oauthAccounts       OAuthAccount[]
+  passwordResetTokens PasswordResetToken[]
+  adminSessions       AdminSession[]
+  loginActivities     LoginActivity[]
+
+  // Notifications
+  webPushSubscriptions    WebPushSubscription[]
+  notificationPreferences NotificationPreference[]
+  notificationSettings    AdminNotificationSettings?
+
+  // Store memberships (staff). NOT ownership — ownership is StoreMember(role: OWNER).
+  storeMemberships StoreMember[]
+
+  // Commerce (customer-facing; scoping per-order / per-cart happens below)
+  addresses      Address[]
+  carts          Cart[]
+  orders         Order[]
+  payments       Payment[]
+  orderRatings   OrderRating[]
+  returnRequests ReturnRequest[]
+  notifications  Notification[]
+  subscriptions  Subscription[]
+
+  // Admin / audit
+  auditLogs       AuditLog[]        @relation("AdminActor")
+  sentInvitations AdminInvitation[] @relation("AdminInviter")
+
+  activities CustomerActivity[]
+
+  // Signup intent — NOT a privilege. Cleared once onboarding is done.
+  pendingAccountType SignupAccountType?
+
+  customerStatus  CustomerStatus @default(ACTIVE)
+  suspendedAt     DateTime?
+  suspendedReason String?
+  loyaltyPoints   Int            @default(0)
+
+  @@index([email])
+  @@index([role])
+}
+
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String // "google"
+  providerAccountId String
+  accessToken       String?
+  refreshToken      String?
+  expiresAt         Int?
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model CustomerActivity {
+  id         String               @id @default(cuid())
+  userId     String
+  type       CustomerActivityType
+  title      String
+  metadata   Json?
+  occurredAt DateTime             @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+}
+
+// Sessions are user-level, NOT store-scoped.
+model AdminSession {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique
+  device       String
+  userAgent    String?
+  ipAddress    String?
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime  @default(now())
+  revokedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([tokenHash])
+}
+
+// Audit of auth events. No FK to Store.
+model LoginActivity {
+  id        String       @id @default(cuid())
+  userId    String?
+  email     String
+  outcome   LoginOutcome
+  device    String?
+  ipAddress String?
+  location  String?
+  reason    String?
+  storeSlug String? // optional hint, no FK
+  createdAt DateTime     @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([email, createdAt])
+}
+
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  storeId   String? // null = platform-wide preference
+  key       String
+  email     Boolean  @default(true)
+  push      Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, key])    // for fast lookups
+  @@unique([userId, storeId, key])
+}
+
+model AdminNotificationSettings {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  quietHoursOn Boolean  @default(false)
+  quietStart   String   @default("22:00")
+  quietEnd     String   @default("07:00")
+  sound        String   @default("chime")
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────
+// ADMIN INVITATIONS
+// ─────────────────────────────────────────────────────────────
+// Rule enforced in service layer:
+//   storeId != null  -> storeRole required, platformRole must be null
+//   storeId == null  -> platformRole required, storeRole must be null
+
+model AdminInvitation {
+  id           String           @id @default(cuid())
+  email        String
+  token        String           @unique
+  storeId      String? // null = platform-level invitation
+  storeRole    StoreMemberRole?
+  platformRole Role?
+  invitedById  String?
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  revokedAt    DateTime?
+
+  invitedBy User?  @relation("AdminInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+  store     Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([token])
+  @@index([storeId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ADDRESSES
+// ─────────────────────────────────────────────────────────────
+
+model Address {
+  id        String  @id @default(cuid())
+  userId    String
+  address   String
+  region    String
+  fullName  String
+  phone     String
+  phone_sec String?
+
+  // For distance calculation
+  latitude  Float?
+  longitude Float?
+
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders        Order[]
+  subscriptions Subscription[]
+
+  @@index([userId])
+  @@index([latitude, longitude])
+}
+
+// ─────────────────────────────────────────────────────────────
+// CATEGORIES (PLATFORM-WIDE — SUPER_ADMIN manages)
+// ─────────────────────────────────────────────────────────────
+
+model Category {
+  id           String         @id @default(cuid())
+  name         String         @unique
+  slug         String         @unique
+  description  String?
+  image        String?
+  status       CategoryStatus @default(ACTIVE)
+  displayOrder Int            @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  products        Product[]
+  promotions      Promotion[]
+  storeCategories StoreCategory[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+// Which categories each store sells
+model StoreCategory {
+  storeId    String
+  categoryId String
+  createdAt  DateTime @default(now())
+
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, categoryId])
+  @@index([categoryId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PRODUCTS (per store)
+// ─────────────────────────────────────────────────────────────
+
+model Product {
+  id               String        @id @default(cuid())
+  storeId          String
+  code             String // unique per store
+  name             String
+  slug             String
+  description      String?
+  shortDescription String?
+  images           String[]
+  categoryId       String
+  sku              String
+  variantOption    VariantOption @default(NONE)
+  unitType         String // "pc", "kg", "bag", "tray"
+  unitPrice        Decimal       @db.Decimal(12, 2)
+  weight           Decimal?      @db.Decimal(10, 3)
+  stock            Int           @default(0)
+  reorderLevel     Int           @default(5)
+  status           ProductStatus @default(ACTIVE)
+  isFeatured       Boolean       @default(false)
+  tags             String[]
+  displayOrder     Int           @default(0)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  store          Store                  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category       Category               @relation(fields: [categoryId], references: [id])
+  variants       ProductVariant[]
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+  stockMovements StockMovement[]
+  promotionLinks PromotionProductLink[]
+
+  @@unique([storeId, code])
+  @@unique([storeId, sku])
+  @@unique([storeId, slug])
+  @@unique([slug])
+  @@index([storeId])
+  @@index([categoryId])
+  @@index([status])
+}
+
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String
+  label     String // "500g", "1kg"
+  sku       String
+  unitPrice Decimal  @db.Decimal(12, 2)
+  stock     Int      @default(0)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@unique([productId, sku])
+  @@index([productId])
+}
+
+model StockMovement {
+  id        String   @id @default(cuid())
+  storeId   String
+  productId String
+  delta     Int
+  reason    String // "order", "restock", "adjustment"
+  reference String? // order id
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([productId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// CART
+// Owned by the user. Scoped per store because each Order is
+// fulfilled by exactly one store. One cart per (user, store).
+// ─────────────────────────────────────────────────────────────
+
+model Cart {
+  id      String  @id @default(cuid())
+  userId  String
+  storeId String
+  phone   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@unique([userId, storeId])
+  @@index([storeId])
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  productId String
+  variantId String?
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cart    Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id])
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@unique([cartId, productId, variantId])
+  @@index([cartId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PROMOTIONS (per store)
+// ─────────────────────────────────────────────────────────────
+
+model Promotion {
+  id                 String          @id @default(cuid())
+  storeId            String
+  name               String
+  type               PromotionType
+  discountType       DiscountType
+  discountValue      Decimal         @db.Decimal(12, 2)
+  appliesTo          AppliesTo
+  categoryId         String?
+  productIds         String[]        @default([])
+  affectedCount      Int             @default(0)
+  minimumOrderAmount Decimal?        @db.Decimal(12, 2)
+  maximumDiscount    Decimal?        @db.Decimal(12, 2)
+  usageLimit         Int?
+  usedCount          Int?            @default(0)
+  limitPerCustomer   Int?
+  code               String? // only for COUPON_CODE
+  startAt            DateTime
+  endAt              DateTime?
+  status             PromotionStatus @default(SCHEDULED)
+
+  // Aggregate counters kept in sync by the service
+  totalProductsAffected Int     @default(0)
+  totalDiscountGiven    Decimal @default(0) @db.Decimal(14, 2)
+  totalOrdersAffected   Int     @default(0)
+  totalSalesMade        Decimal @default(0) @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store        Store                  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category     Category?              @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  orders       Order[]
+  productLinks PromotionProductLink[]
+
+  @@unique([storeId, code])
+  @@index([storeId])
+  @@index([status])
+  @@index([type])
+  @@index([startAt, endAt])
+}
+
+model PromotionProductLink {
+  promotionId String
+  productId   String
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, productId])
+  @@index([productId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ORDERS (per store)
+// ─────────────────────────────────────────────────────────────
+
+model Order {
+  id               String       @id @default(cuid())
+  storeId          String
+  orderNumber      String // unique per store
+  userId           String
+  addressId        String?
+  promoCodeId      String?
+  subtotal         Decimal      @db.Decimal(12, 2)
+  discount         Decimal      @default(0) @db.Decimal(12, 2)
+  deliveryFee      Decimal      @default(0) @db.Decimal(12, 2)
+  total            Decimal      @db.Decimal(12, 2)
+  status           OrderStatus  @default(PENDING)
+  type             OrderType    @default(SHOP)
+  deliveryType     DeliveryType
+  deliveryZoneId   String?
+  deliveryWindow   String?
+  deliveryNotes    String?
+  deliveryPhoto    String?
+  receiverPhone    String
+  receiverName     String
+  contactEmail     String?
+  /**
+   * Snapshot of the address text at order time; Address record may change later
+   */
+  deliveryAddress  String?
+  returnWindowDays Int          @default(7)
+  placedAt         DateTime     @default(now())
+  deliveredAt      DateTime?
+  cancelledAt      DateTime?
+  cancelReason     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store          Store           @relation(fields: [storeId], references: [id])
+  user           User            @relation(fields: [userId], references: [id])
+  address        Address?        @relation(fields: [addressId], references: [id])
+  promoCode      Promotion?      @relation(fields: [promoCodeId], references: [id])
+  deliveryZone   DeliveryZone?   @relation(fields: [deliveryZoneId], references: [id])
+  items          OrderItem[]
+  timeline       Json            @default("[]")
+  payments       Payment[]
+  rating         OrderRating?
+  returnRequests ReturnRequest[]
+  notifications  Notification[]
+
+  @@unique([storeId, orderNumber])
+  @@index([storeId])
+  @@index([userId])
+  @@index([status])
+  @@index([placedAt])
+}
+
+model OrderItem {
+  id           String  @id @default(cuid())
+  orderId      String
+  productId    String
+  variantId    String?
+  productName  String // snapshot
+  variantLabel String? // snapshot
+  image        String? // snapshot
+  unitLabel    String? // snapshot, e.g. "kg"
+  unitPrice    Decimal @db.Decimal(12, 2) // snapshot
+  quantity     Int
+  lineTotal    Decimal @db.Decimal(12, 2)
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id])
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model OrderRating {
+  id          String   @id @default(cuid())
+  orderId     String   @unique
+  userId      String
+  stars       Int // 1..5 (validated in service)
+  comment     String?
+  submittedAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ReturnRequest {
+  id           String       @id @default(cuid())
+  orderId      String
+  userId       String
+  status       ReturnStatus @default(PENDING_REVIEW)
+  reason       String
+  /**
+   * If empty -> full order return; otherwise specific OrderItem ids
+   */
+  itemIds      String[]
+  refundAmount Decimal?     @db.Decimal(12, 2)
+  adminNote    String?
+  requestedAt  DateTime     @default(now())
+  resolvedAt   DateTime?
+  updatedAt    DateTime     @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// MEMBERSHIP PLANS & PROTEINS (per store)
+// ─────────────────────────────────────────────────────────────
+
+model MembershipPlan {
+  id                String             @id @default(cuid())
+  storeId           String
+  slug              String
+  name              String
+  description       String?
+  price             Decimal            @db.Decimal(12, 2)
+  interval          MembershipInterval
+  deliveryFrequency DeliveryFrequency
+  supply            String[]           @default([])
+  status            ActiveStatus       @default(ACTIVE)
+  displayOrder      Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+
+  @@unique([storeId, slug])
+  @@index([storeId])
+  @@index([status])
+}
+
+model Protein {
+  id           String       @id @default(cuid())
+  storeId      String
+  label        String
+  description  String
+  image        String?
+  status       ActiveStatus @default(ACTIVE)
+  displayOrder Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  store    Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  mixItems ProteinMixItem[]
+
+  @@unique([storeId, label])
+  @@index([storeId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// SUBSCRIPTIONS (per store)
+// ─────────────────────────────────────────────────────────────
+
+model Subscription {
+  id      String             @id @default(cuid())
+  storeId String
+  userId  String
+  planId  String
+  status  SubscriptionStatus @default(PENDING_PAYMENT)
+
+  deliveryFrequency DeliveryFrequency
+  deliveryDay       String // "Monday"
+  deliveryWindow    String // "8:00 AM – 10:00 AM"
+
+  // Address is snapshotted so plan changes don't affect existing delivery
+  addressId String?
+
+  startedAt      DateTime  @default(now())
+  nextDeliveryAt DateTime?
+  nextBillingAt  DateTime?
+  pausedAt       DateTime?
+  cancelledAt    DateTime?
+  cancelReason   String?
+  skipUntil      DateTime? // for skip-delivery
+
+  currentDeliveryStatus   DeliveryStatus @default(SCHEDULED)
+  /**
+   * When staff marked the current delivery.
+   */
+  currentDeliveryMarkedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store    Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  payments Payment[]
+  address  Address?       @relation(fields: [addressId], references: [id])
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan     MembershipPlan @relation(fields: [planId], references: [id])
+
+  mix           ProteinMixItem[]
+  notifications Notification[]
+
+  // One active subscription per user per store
+  @@unique([userId, storeId])
+  @@index([storeId])
+  @@index([status])
+  @@index([nextBillingAt])
+  @@index([nextDeliveryAt])
+}
+
+model ProteinMixItem {
+  id             String @id @default(cuid())
+  subscriptionId String
+  proteinId      String
+  percentage     Int // 0-100
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  protein      Protein      @relation(fields: [proteinId], references: [id])
+
+  @@unique([subscriptionId, proteinId])
+  @@index([subscriptionId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// DELIVERY ZONES (per store, with geo)
+// ─────────────────────────────────────────────────────────────
+
+model DeliveryZone {
+  id            String   @id @default(cuid())
+  storeId       String
+  name          String
+  fee           Decimal  @db.Decimal(12, 2)
+  minOrderTotal Decimal? @db.Decimal(12, 2)
+  isActive      Boolean  @default(true)
+
+  // ── Geo configuration for distance calculation
+  shape ZoneShape @default(RADIUS)
+  // For RADIUS: center + radiusKm
+  centerLat Float?
+  centerLng Float?
+  radiusKm  Float?
+  // For POLYGON: store GeoJSON or array of [lat,lng] pairs
+  polygon   Json?
+
+  // Optional priority when zones overlap (higher = wins)
+  priority Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@unique([storeId, name])
+  @@index([storeId])
+  @@index([centerLat, centerLng])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PAYMENTS (per store)
+// ─────────────────────────────────────────────────────────────
+
+model Payment {
+  id            String          @id @default(cuid())
+  storeId       String
+  orderId       String?
+  userId        String
+  provider      PaymentProvider
+  providerRef   String          @unique
+  amount        Decimal         @db.Decimal(12, 2)
+  currency      String          @default("NGN")
+  status        PaymentStatus   @default(PENDING)
+  failureReason String?
+  attemptNumber Int             @default(1)
+  metadata      Json?
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  accessCode       String? // Paystack access_code
+  authorizationUrl String? // Paystack authorization_url
+  channel          String? // "card", "bank", "ussd", etc.
+  paidAt           DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id])
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+  @@index([providerRef])
+}
+
+// ─────────────────────────────────────────────────────────────
+// NOTIFICATIONS (per store when applicable)
+// ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id             String              @id @default(cuid())
+  storeId        String?
+  userId         String?
+  orderId        String?
+  subscriptionId String?
+  channel        NotificationChannel
+  status         NotificationStatus  @default(PENDING)
+  subject        String?
+  body           String
+  metadata       Json?
+  sentAt         DateTime?
+  createdAt      DateTime            @default(now())
+
+  isOpened      Boolean @default(false)
+  failureReason String?
+
+  store        Store?        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order        Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([storeId])
+  @@index([userId])
+  @@index([status])
+  @@index([userId, createdAt])
+}
+
+model WebPushSubscription {
+  id         String    @id @default(cuid())
+  userId     String
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ADMIN AUDIT LOG
+// ─────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  storeId    String?
+  actorId    String?
+  action     String // "product.update", "order.refund"
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  actor User?  @relation("AdminActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([storeId])
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// SEQUENCE COUNTERS (per store)
+// ─────────────────────────────────────────────────────────────
+
+model Counter {
+  id      String  @id @default(cuid())
+  name    String
+  storeId String?
+  value   Int     @default(0)
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, name])
+  @@index([storeId])
+}
