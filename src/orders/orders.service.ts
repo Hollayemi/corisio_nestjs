@@ -51,7 +51,6 @@ export class OrdersService {
     const store = await this.db.store.findUnique({
       where: { id: dto.storeId },
     });
-    console.log("Resolved store:", store);
     if (!store || store.status !== "ACTIVE") {
       throw new NotFoundException("Store not found or inactive");
     }
@@ -271,16 +270,22 @@ export class OrdersService {
       });
 
       for (const line of lineItems) {
-        if (line.variantId) {
-          await tx.productVariant.update({
-            where: { id: line.variantId },
-            data: { stock: { decrement: line.quantity } },
-          });
-        } else {
-          await tx.product.update({
-            where: { id: line.productId },
-            data: { stock: { decrement: line.quantity } },
-          });
+        // Conditional decrement: only succeeds while enough stock remains, so two
+        // concurrent orders can't both pass the earlier read-only check and
+        // drive stock negative. Throwing rolls the whole transaction back.
+        const decremented = line.variantId
+          ? await tx.productVariant.updateMany({
+              where: { id: line.variantId, stock: { gte: line.quantity } },
+              data: { stock: { decrement: line.quantity } },
+            })
+          : await tx.product.updateMany({
+              where: { id: line.productId, stock: { gte: line.quantity } },
+              data: { stock: { decrement: line.quantity } },
+            });
+        if (decremented.count === 0) {
+          throw new BadRequestException(
+            `Insufficient stock for "${line.productId}" — it just sold out`,
+          );
         }
         await tx.stockMovement.create({
           data: {
@@ -428,19 +433,37 @@ export class OrdersService {
     });
     if (!payment || payment.status === "SUCCESS") return;
 
+    // Paystack reports the amount in kobo — never trust the event blindly.
+    const expectedKobo = Math.round(Number(payment.amount) * 100);
+    if (event.data.amount !== expectedKobo) {
+      this.logger.error(
+        `Webhook amount mismatch for ${reference}: expected ${expectedKobo}, got ${event.data.amount}`,
+      );
+      await this.db.payment.updateMany({
+        where: { id: payment.id, status: { not: "SUCCESS" } },
+        data: { status: "FAILED", failureReason: "Amount mismatch" },
+      });
+      return;
+    }
+
     const paidAt = event.data.paid_at
       ? new Date(event.data.paid_at)
       : new Date();
 
     await this.db.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: payment.id },
+      // Atomic claim: if another webhook/verify call won the race, do nothing.
+      const claimed = await tx.payment.updateMany({
+        where: { id: payment.id, status: { not: "SUCCESS" } },
         data: { status: "SUCCESS", channel: event.data.channel, paidAt },
       });
-      await tx.order.update({
-        where: { id: payment.orderId! },
-        data: { status: "PROCESSING" },
-      });
+      if (claimed.count === 0) return;
+
+      if (payment.orderId) {
+        await tx.order.update({
+          where: { id: payment.orderId },
+          data: { status: "PROCESSING" },
+        });
+      }
     });
   }
 

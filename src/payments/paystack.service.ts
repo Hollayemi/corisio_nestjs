@@ -50,7 +50,6 @@ export class PaystackService {
     if (!this.secret) {
       this.logger.warn("PAYSTACK_SECRET_KEY is not set — payments will fail");
     }
-    console.log(this.secret, "=========>")
     this.http = axios.create({
       baseURL: "https://api.paystack.co",
       headers: {
@@ -108,12 +107,11 @@ export class PaystackService {
   }
 
   async confirmPayment(reference: string) {
-    console.log("=======>", reference)
     const verify = await this.verify(reference);
 
     if (verify.status !== "success") {
       await this.db.payment.updateMany({
-        where: { providerRef: reference },
+        where: { providerRef: reference, status: { not: "SUCCESS" } },
         data: {
           status: "FAILED",
           failureReason: verify.raw?.gateway_response ?? "Payment not successful",
@@ -136,15 +134,19 @@ export class PaystackService {
       include: { order: true },
     });
 
-    console.log({payment})
     if (!payment) throw new NotFoundException("Payment not found");
-    // if (!payment.order) throw new NotFoundException("Order not found for this payment");
 
-    // 4. Guard against double-processing (webhooks + client verify both call this)
-    // if (payment.status === "SUCCESS") {
-    //   this.logger.warn(`Payment ${reference} already confirmed; skipping`);
-    //   return `${this.config.get("FRONTEND_URL")}/orders?order=${payment.order.id}`
-    // }
+    const frontendUrl = this.config.get<string>("FRONTEND_URL") ?? "http://localhost:3000";
+
+    // 4. Guard against double-processing (webhook, client verify and this
+    //    callback can all fire for the same payment). Never re-run the
+    //    transition: it would reset the order status and re-send notifications.
+    if (payment.status === "SUCCESS") {
+      this.logger.warn(`Payment ${reference} already confirmed; skipping`);
+      return payment.subscriptionId
+        ? `${frontendUrl}/subscription/checkout?subscription=${payment.id}`
+        : `${frontendUrl}/orders?order=${payment.orderId}`;
+    }
 
     // 5. Sanity-check the amount — Paystack sends kobo
     const expectedKobo = Math.round(Number(payment.amount) * 100);
@@ -201,9 +203,8 @@ export class PaystackService {
       if (payment.orderId) {
         const result = await tx.order.update({
           where: { id: payment.orderId! },
-          data: { status: "PENDING" },
+          data: { status: "PROCESSING" }, // paid → ready for the store to pack
         });
-
 
         const newTimeline = markPaymentConfirmed(
           result.timeline as unknown as OrderStep[],
@@ -233,8 +234,6 @@ export class PaystackService {
     });
 
     this.logger.log(`Payment confirmed: ${reference} → order ${updated?.result?.id}`);
-
-    const frontendUrl = this.config.get<string>("FRONTEND_URL") ?? "http://localhost:3000";
 
     const redirectUrl = payment.subscriptionId
       ? `${frontendUrl}/subscription/checkout?subscription=${payment.id}`

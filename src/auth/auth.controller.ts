@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { Throttle } from "@nestjs/throttler";
 
 import {
   CreateStoreDto,
@@ -26,16 +27,14 @@ import { CurrentUser } from "../common/decorator/current-user.decorator.js";
 import { AuthService } from "./auth.service.js";
 
 
+// With `trust proxy` configured in main.ts, Express resolves req.ip from
+// X-Forwarded-For safely. Never read that header directly: callers can spoof it.
 function clientIp(req: Request): string | undefined {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length > 0) {
-    return fwd.split(",")[0]!.trim();
-  }
-  if (Array.isArray(fwd) && fwd.length > 0) {
-    return fwd[0]!.split(",")[0]!.trim();
-  }
   return req.ip ?? req.socket?.remoteAddress ?? undefined;
 }
+
+// Stricter than the global limit: credential endpoints are brute-force targets.
+const AUTH_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 
 @Controller("auth")
 export class AuthController {
@@ -45,11 +44,13 @@ export class AuthController {
   // REGISTER / LOGIN
   // ─────────────────────────────────────────────
 
+  @Throttle(AUTH_THROTTLE)
   @Post("register")
   register(@Body() dto: RegisterDto) {
     return this.auth.register(dto);
   }
 
+  @Throttle(AUTH_THROTTLE)
   @Post("login")
   login(
     @Body() dto: LoginDto,
@@ -59,6 +60,7 @@ export class AuthController {
     return this.auth.login(dto, userAgent, clientIp(req));
   }
 
+  @Throttle(AUTH_THROTTLE)
   @Post("google")
   google(
     @Body() dto: GoogleDto,
@@ -87,16 +89,19 @@ export class AuthController {
   // PASSWORD RESET / EMAIL VERIFY
   // ─────────────────────────────────────────────
 
+  @Throttle(AUTH_THROTTLE)
   @Post("forgot-password")
   forgot(@Body() dto: ForgotPasswordDto) {
     return this.auth.forgotPassword(dto.email);
   }
 
+  @Throttle(AUTH_THROTTLE)
   @Post("reset-password")
   reset(@Body() dto: ResetPasswordDto) {
     return this.auth.resetPassword(dto.token, dto.password);
   }
 
+  @Throttle(AUTH_THROTTLE)
   @Get("verify-email")
   @Redirect()
   async verify(@Query("token") token: string) {

@@ -20,8 +20,9 @@ export class RolesGuard implements CanActivate {
     if (!required || required.length === 0) return true;
 
     const { user } = context.switchToHttp().getRequest();
-    console.log("user", user, "required roles", required);
-    if (!user || !required.includes(user.memberships.role)) {
+    // `Roles()` carries account-level roles (e.g. SUPER_ADMIN). `user.memberships`
+    // is a map keyed by store slug, so it has no `.role` of its own.
+    if (!user || !required.includes(user.role)) {
       throw new ForbiddenException("Admin access required");
     }
     return true;

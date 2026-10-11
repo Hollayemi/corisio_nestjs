@@ -78,7 +78,6 @@ export class AdminCategoriesController {
     }
 
     if (dto.displayOrder) dto.displayOrder = Number(dto.displayOrder)
-    console.log(dto)
     return {
       message: "Category updated",
       data: await this.categories.update(id, dto),

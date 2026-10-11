@@ -92,7 +92,6 @@ export class CategoriesService {
   async create(dto: CreateCategoryDto) {
     const slug = dto.slug ? slugify(dto.slug) : slugify(dto.name);
 
-    console.log({dto})
 
     const existing = await this.db.category.findFirst({
       where: { OR: [{ name: dto.name }, { slug }] },
@@ -121,7 +120,6 @@ export class CategoriesService {
   async update(id: string, dto: UpdateCategoryDto) {
     const existing = await this.db.category.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Category not found");
-    console.log(dto)
     let slug: string | undefined;
     if (dto.slug || dto.name) {
       slug = slugify(dto.slug ?? dto.name ?? existing.name);

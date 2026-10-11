@@ -14,22 +14,14 @@ export class StoreContextGuard implements CanActivate {
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest();
     const user = req.user;
-    console.log("user", user);
     if (!user) throw new ForbiddenException("Not authenticated");
 
-    
-    if (req.user.memberships.storeId) {
-      throw new ForbiddenException("Missing store context");
-    }
-
-    const membership = req.user.memberships[req.user.defaultSlug] || req.user.memberships[Object.keys(req.user.memberships)[0]];
-    console.log("membership", membership);
+    const memberships = user.memberships ?? {};
+    const membership =
+      memberships[user.defaultSlug] ?? memberships[Object.keys(memberships)[0]];
     if (!membership) throw new ForbiddenException("Missing store context");
 
-    console.log("Resolving store context for membership:", membership);
-
-    const store = await this.db.store.findUnique({ where: { slug: membership.storeSlug  } });
-    console.log("Store context resolved:", store);
+    const store = await this.db.store.findUnique({ where: { slug: membership.storeSlug } });
     if (!store) { //|| store.status !== "ACTIVE"
       throw new NotFoundException("Store not found or inactive");
     }
@@ -48,7 +40,6 @@ export class StoreMemberGuard implements CanActivate {
   async canActivate(ctx: ExecutionContext) {
     const req = ctx.switchToHttp().getRequest();
     const user = req.user;
-    console.log("user", user);
     const storeId = req.storeId;
     if (!storeId) throw new ForbiddenException("Missing store context");
 

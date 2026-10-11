@@ -61,7 +61,6 @@ export class AdminProductsController {
       throw new BadRequestException("Product image required");
     }
     const urls = await this.cloudinary.uploadMany(images);
-console.log("urls", urls);
     return {
       message: "Product created",
       data: await this.products.create(req.storeId, {

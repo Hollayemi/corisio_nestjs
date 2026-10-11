@@ -65,12 +65,10 @@ export class AuthService {
       }, {} as Record<string, any>) ?? {},
     };
 
-    console.log("Signing JWT payload:", payload);
     return this.jwt.sign(payload);
   }
 
   private sanitize(user: any) {
-    console.log("Sanitizing user:", user);
     if (!user) return user;
     const { passwordHash, twoFactorSecret, ...safe } = user;
     return safe;
@@ -780,7 +778,6 @@ export class AuthService {
     });
     if (!user) throw new NotFoundException("User not found");
 
-    console.log("User memberships:", user);
 
     return {
       message: "OK",

@@ -14,7 +14,6 @@ export class PaymentsController {
     @Res() res: Response,
   ): Promise<any> {
     const result =  await this.ps.confirmPayment(reference.reference);
-    console.log(result)
     return res.redirect(302, result);
   }
 }
